@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+</head>
+<body>
+  <div id="app">
+    <div class="container-fluid">
+      <h1>[( title )] <span style="color: rgb(78, 77, 77);">([( createdDate )])</span></h1>
+      <!-- summary -->
+      <div class="row">
+        <div class="col">
+          <h2>
+            Total [( report.summary.collected )] 
+            <span style="color: red;">Failed [( report.summary.failed )]</span> 
+            <span style="color: green;">Passed [( report.summary.passed )]</span> 
+            <span style="color: grey;">Skipped [( report.summary.skipped ? report.summary.skipped : 0 )]</span></h2>
+        </div>
+      </div>
+      <!-- report -->
+      <div class="row">
+        <div class="col-md-4">
+          <!-- filters -->
+          <div class="row" style="margin-bottom: 5px;">
+            <div class="col">
+              <label for="outcome">Status</label>
+              <select id="outcome" v-model="nodeStatus" class="form-control">
+                <option value="">All</option>
+                <option value="failed">Failed</option>
+                <option value="skipped">Skipped</option>
+                <option value="passed">Passed</option>
+              </select>
+            </div>
+          </div>
+          <div class="row" style="margin-bottom: 5px;">
+            <div class="col">
+              <label for="markers">Markers</label>
+              <select v-if="showMarkerFilters" id="markers" class="form-control" v-model="selectedKeywords" multiple :size="allKeywords.length" style="margin-bottom: 3px;">
+                <option v-for="keyword in allKeywords.sort()">[( keyword )]</option>
+              </select>
+              <button v-if="showMarkerFilters" type="button" class="btn btn-primary" @click="selectedKeywords = []">Reset marker filters</button>
+              <button type="button" class="btn btn-info" @click="showMarkerFilters = !showMarkerFilters">[( showMarkerFilters ? 'Hide marker filters' : 'Show marker filters' )]</button>
+            </div>
+          </div>
+          <!-- tests -->
+          <div class="list-group" v-for="(test, i) in filteredNodes" :key="i">
+            <a 
+            style="margin-bottom: 2px;" 
+            href="#" 
+            :class="`list-group-item list-group-item-${getColor(test.outcome)} list-group-item-action${isActiveNode(i) ? ' active' : ''}`" 
+            @click="activeNodeIndex = i">
+              [( test.metadata.test_title ? test.metadata.test_title : test.nodeid )]
+            </a>
+          </div>
+        </div>
+        <div class="col-md-8">
+          <div v-if="activeNodeData">
+            <div class="row">
+              <div class="col">
+                <span v-for="keyword in activeNodeData.keywords" class="badge badge-secondary" style="margin-right: 3px;">[( keyword )]</span>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col" v-if="activeNodeData.metadata.test_title">
+                <h2>[( activeNodeData.metadata.test_title )]</h2>
+                <h4>[( activeNodeData.nodeid )]</h4>
+                <h5 v-html="activeNodeData.metadata.test_description"></h5>
+              </div>
+              <div class="col" v-else>
+                <h2>[( activeNodeData.nodeid )]</h2>
+              </div>
+              <div class="col text-right">
+                <h2><span :class="`badge badge-${getColor(activeNodeData.outcome)}`">[( activeNodeData.outcome )]</span></h2>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col">
+                <hr>
+                <h4>Setup: [( activeNodeData.setup.outcome )]</h4>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col">
+                <hr>
+                <h4>Test: [( activeNodeData.call.outcome )]</h4>
+                <!-- when failed -->
+                <div class="row" v-if="activeNodeData.call.crash">
+                  <div class="col">
+                    <h5 style="cursor: pointer; color: blue;" @click="showErrorInfo = !showErrorInfo">Error info</h5>
+                    <pre v-if="showErrorInfo" style="border-style: solid; border-width: 2px; border-color: red; margin: 5px; padding: 5px;"><code>
+[( activeNodeData.call.crash.path )] line: [( activeNodeData.call.crash.lineno )]
+message: [( activeNodeData.call.crash.message )]
+
+error trace:
+[( activeNodeData.call.longrepr )]
+                    </code></pre>
+                  </div>
+                </div>
+                <!-- log messages -->
+                <div class="row" v-if="activeNodeData.call.logMessages.length > 0">
+                  <div class="col">
+                    <h5>Log messages</h5>
+                    <div class="row" style="margin-bottom: 5px;">
+                      <div class="col">
+                        <select class="form-control" v-model="logStatuses" multiple>
+                          <option>debug</option>
+                          <option>info</option>
+                          <option>warning</option>
+                          <option>error</option>
+                        </select>
+                      </div>
+                      <div class="col">
+                        <button class="btn btn-primary" @click="logStatuses = []">Reset filter</button>
+                      </div>
+                    </div>
+                    <div v-for="logMessage in filteredActiveNodeLogMessages" :class="`alert alert-${getLogColor(logMessage.type)}`" role="alert" style="margin-bottom: 3px !important;">
+                      [( logMessage.message )]
+                    </div>
+                  </div>
+                </div>
+                <!-- screenshots -->
+                <div class="row" v-if="activeNodeScreenshots.length > 0">
+                  <div class="col">
+                    <h5>Screenshots</h5>
+                    <div class="row" v-for="screenshot in activeNodeScreenshots">
+                      <div class="col">
+                        <a :href="`../screenshots/${screenshot.file}`" target="_blank"><img style="border-style: solid; border-width: 2px; width: 25%" :src="`../screenshots/${screenshot.file}`"></a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="col">
+                <hr>
+                <h4>Teardown: [( activeNodeData.teardown.outcome )]</h4>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+<script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+<script>
+var app = new Vue({
+  el: '#app',
+  delimiters: ['[(', ')]'],
+  data: {
+    message: 'Hello Vue!',
+    title: '{{ title }}',
+    nodeStatus: '',
+    logStatuses: [],
+    selectedKeywords: [],
+    showErrorInfo: true,
+    showMarkerFilters: false,
+    report: {{report_json}},
+    activeNodeIndex: null
+  },
+  mounted: function () {
+    console.log(this.report)
+  },
+  methods: {
+    isActiveNode: function (index) {
+      return index === this.activeNodeIndex
+    },
+    getColor: function (outcome) {
+      return outcome === 'passed'
+        ? 'success'
+        : outcome === 'failed'
+          ? 'danger'
+          : 'secondary'
+    },
+    getLogColor: function (logMessageType) {
+      return logMessageType === 'debug'
+        ? 'dark'
+        : logMessageType === 'error'
+         ? 'danger'
+         : logMessageType
+    },
+    getFilteredNodes: function (nodes) {
+      const result = nodes.filter(node => {
+        for (let k of this.selectedKeywords) {
+          if (node.keywords.indexOf(k) === -1) {
+            return false
+          }
+        }
+        return true
+      })
+      return result
+    },
+  },
+  watch: {
+    nodeStatus: function () {
+      this.activeNodeIndex = null
+    }
+  },
+  computed: {
+    allKeywords: function () {
+      const result = [] 
+      for (let test of this.report.tests) {
+        for(let keyword of test.keywords) {
+          if (result.indexOf(keyword) === -1 && keyword !== 'pytestmark') result.push(keyword)
+        }
+      }
+      return result
+    },
+    filteredActiveNodeLogMessages: function () {
+      const messages = this.activeNodeData.call.logMessages
+      if (!messages) return []
+      if (this.logStatuses.length === 0) return messages
+      return messages.filter(message => this.logStatuses.indexOf(message.type) !== -1)
+    },
+    createdDate: function () {
+      return new Date(this.report.created * 1000).toISOString().replace('T', ' ').substring(0, 19)
+    },
+    activeNodeScreenshots: function () {
+      if (this.activeNodeData) {
+        return !this.report.screenshots 
+        ? []
+        : !this.report.screenshots.filter(screenshot => screenshot.nodeid === this.activeNodeData.nodeid)
+      }
+    },
+    filteredNodes: function () {
+      let result =  this.nodeStatus === ''
+        ? this.report.tests
+        : this.report.tests.filter(node => node.outcome === this.nodeStatus)
+      let finalResult = this.getFilteredNodes(result)
+      return finalResult
+    },
+    activeNodeData: function () {
+      const data = this.filteredNodes[this.activeNodeIndex]
+      if (data) {
+        const callStdout = data.call !== null && data.call !== undefined
+          && data.call.stdout !== null && data.call.stdout !== undefined
+          ? data.call.stdout
+          : null
+        if (callStdout) {
+          data.call.logMessages = callStdout.split('\n')
+            .filter(message => message.indexOf('<log-message>') !== -1)
+            .map(filteredMessage => {
+              const strippedMessage = filteredMessage.replace('<log-message>', '').replace('</log-message>', '')
+              const splittedMessage = strippedMessage.split('||=>')
+              return {
+                type: splittedMessage[0],
+                message: splittedMessage[1]
+              }
+            })
+        }
+      }
+      console.log(data)
+      return data
+    }
+  }
+})
+</script>
+</body>
+</html>
